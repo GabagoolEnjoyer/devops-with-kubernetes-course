@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pingpong-deployment
+  labels:
+    app: pingpong
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pingpong
+  template:
+    metadata:
+      labels:
+        app: pingpong
+    spec:
+      containers:
+      - name: pingpong
+        image: pingpong:1.0
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            memory: "256Mi"  # Maximum memory allowed
+            cpu: "200m"      # Maximum CPU allowed
+          requests:
+            memory: "128Mi"  # Initial memory request
+            cpu: "100m"  
+    
