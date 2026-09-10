@@ -14,11 +14,18 @@ spec:
       labels:
         app: pingpong
     spec:
+      volumes:
+        - name: shared-image
+          persistentVolumeClaim:
+            claimName: project-pvc
       containers:
       - name: pingpong
-        image: pingpong:1.0
+        image: pingpong:1.2
         ports:
         - containerPort: 80
+        volumeMounts:
+        - name: shared-image
+          mountPath: /usr/src/app/files
         resources:
           limits:
             memory: "256Mi"  # Maximum memory allowed
@@ -26,4 +33,7 @@ spec:
           requests:
             memory: "128Mi"  # Initial memory request
             cpu: "100m"  
+        env:
+        - name: COUNTER_FILE
+          value: /usr/src/app/files/pingpong-counter.txt
     

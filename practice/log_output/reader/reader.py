@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Reader container:
-- Читает общий файл
-- Отдаёт его содержимое по HTTP GET /
+- Читает лог-файл (пишется writer'ом)
+- Читает счётчик ping/pong (пишется pingpong'ом)
+- При HTTP-запросе отдаёт последнюю строку лога + количество ping/pong
 """
 
 import os
@@ -10,14 +11,14 @@ import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
 
-# Тот же путь, что и у writer
+# Путь к лог-файлу (пишется writer'ом)
 LOG_FILE = os.environ.get("LOG_FILE", "/shared/log-output.txt")
+
+# Путь к файлу со счётчиком ping/pong (пишется pingpong'ом)
+COUNTER_FILE = os.environ.get("COUNTER_FILE", "/shared/pingpong-counter.txt")
 
 # Порт HTTP-сервера
 PORT = int(os.environ.get("PORT", "8080"))
-
-# Сколько последних строк отдавать (0 = все)
-TAIL_LINES = int(os.environ.get("TAIL_LINES", "10"))
 
 
 def get_timestamp() -> str:
@@ -25,21 +26,66 @@ def get_timestamp() -> str:
     return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def read_log_file() -> str:
-    """Читает файл и возвращает содержимое (последние N строк)."""
+def read_last_log_line() -> str:
+    """
+    Читает последнюю строку из лог-файла.
+    Возвращает пустую строку, если файл не существует или пустой.
+    """
     if not os.path.exists(LOG_FILE):
         return ""
 
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
             lines = f.readlines()
+
+        if not lines:
+            return ""
+
+        # Берём последнюю строку и убираем переносы
+        last_line = lines[-1].rstrip('\n\r')
+        return last_line
     except (IOError, OSError):
         return ""
 
-    if TAIL_LINES > 0:
-        lines = lines[-TAIL_LINES:]
 
-    return "".join(lines)
+def read_pingpong_count() -> int:
+    """
+    Читает текущее количество ping/pong запросов из файла.
+    Возвращает 0, если файл не существует, пустой или содержит невалидные данные.
+    """
+    try:
+        if not os.path.exists(COUNTER_FILE):
+            return 0
+
+        with open(COUNTER_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+
+        if not content:
+            return 0
+
+        return int(content)
+    except (IOError, OSError, ValueError):
+        return 0
+
+
+def format_response() -> str:
+    """
+    Формирует ответ в требуемом формате:
+    2020-03-30T12:15:17.705Z: 8523ecb1-c716-4cb6-a044-b9e83bb98e43.
+    Ping / Pongs: 3
+    """
+    last_line = read_last_log_line()
+    count = read_pingpong_count()
+
+    if not last_line:
+        # Writer ещё не успел записать ни одной строки
+        return f"No log data available yet.\nPing / Pongs: {count}\n"
+
+    # Добавляем точку в конце строки лога, если её там нет (согласно ТЗ)
+    if not last_line.endswith('.'):
+        last_line = last_line + '.'
+
+    return f"{last_line}\nPing / Pongs: {count}\n"
 
 
 class LogReaderHandler(BaseHTTPRequestHandler):
@@ -47,20 +93,15 @@ class LogReaderHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
-            content = read_log_file()
-
-            if content:
-                self._send_text(content)
-            else:
-                self._send_text("No log data available yet.\n")
+            content = format_response()
+            self._send_text(content)
 
         elif self.path == "/status":
-            content = read_log_file()
+            content = format_response()
             status = {
                 "timestamp": get_timestamp(),
                 "log_file": LOG_FILE,
-                "file_exists": os.path.exists(LOG_FILE),
-                "tail_lines": TAIL_LINES,
+                "counter_file": COUNTER_FILE,
                 "content": content
             }
             self._send_json(status)
@@ -94,8 +135,8 @@ class LogReaderHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     print(f"Reader started on port {PORT}", flush=True)
-    print(f"Reading from file: {LOG_FILE}", flush=True)
-    print(f"Tail lines: {TAIL_LINES}", flush=True)
+    print(f"Log file: {LOG_FILE}", flush=True)
+    print(f"Counter file: {COUNTER_FILE}", flush=True)
 
     try:
         server = HTTPServer(("0.0.0.0", PORT), LogReaderHandler)
