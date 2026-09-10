@@ -1,15 +1,15 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: todo-app-ingress
-spec:
-  rules:
-    - http:
-        paths:
-        - path: /status
-          pathType: Prefix
-          backend:
-            service:
-              name: todo-app-svc
-              port:
-                number: 7777
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: todo-app-ingress
+# spec:
+#   rules:
+#     - http:
+#         paths:
+#         - path: /status
+#           pathType: Prefix
+#           backend:
+#             service:
+#               name: todo-app-svc
+#               port:
+#                 number: 7777
