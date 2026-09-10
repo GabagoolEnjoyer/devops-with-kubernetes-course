@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo App</title>
+    <style>
+        body { 
+            font-family: system-ui, -apple-system, sans-serif; 
+            max-width: 600px; 
+            margin: 40px auto; 
+            padding: 0 20px; 
+            background: #f4f6f8; 
+            color: #333; 
+        }
+        h1 { text-align: center; color: #2c3e50; }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+        }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { 
+            padding: 15px; 
+            border-bottom: 1px solid #eee; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        li:last-child { border-bottom: none; }
+        .status { font-size: 1.2em; }
+        .port-info { 
+            text-align: center; 
+            color: #7f8c8d; 
+            font-size: 0.9em; 
+            margin-top: 20px; 
+        }
+    </style>
+</head>
+<body>
+    <h1>📝 Todo App</h1>
+    <div class="card">
+        <ul id="todos">
+            <li>
+                <span>Подготовить Python-сервер</span>
+                <span class="status">✅</span>
+            </li>
+            <li>
+                <span>Вернуть HTML на GET /</span>
+                <span class="status">✅</span>
+            </li>
+            <li>
+                <span>Проверить работу через порт-форвардинг</span>
+                <span class="status">⏳</span>
+            </li>
+        </ul>
+    </div>
+    <p class="port-info">Server is running on port <strong>{port}</strong></p>
+</body>
+</html>

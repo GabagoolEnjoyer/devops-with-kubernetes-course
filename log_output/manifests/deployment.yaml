@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-output-deployment
+  labels:
+    app: log-output
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-output
+  template:
+    metadata:
+      labels:
+        app: log-output
+    spec:
+      volumes:
+        - name: shared-image
+          emptyDir: {}
+      containers:
+      - name: writer
+        image: writer:1.0
+        imagePullPolicy: Never
+        # ports:
+        # - containerPort: 8080
+        volumeMounts:
+        - name: shared-image
+          mountPath: /usr/src/app/files
+        resources:
+          limits:
+            memory: "256Mi"  # Maximum memory allowed
+            cpu: "200m"      # Maximum CPU allowed
+          requests:
+            memory: "128Mi"  # Initial memory request
+            cpu: "100m"
+        env:
+        - name: LOG_FILE
+          value: /usr/src/app/files/log-output.txt
+
+      - name: reader
+        image: reader:1.0
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: shared-image
+          mountPath: /usr/src/app/files
+        resources:
+          limits:
+            memory: "256Mi"  # Maximum memory allowed
+            cpu: "200m"      # Maximum CPU allowed
+          requests:
+            memory: "128Mi"  # Initial memory request
+            cpu: "100m"
+        env:
+        - name: LOG_FILE
+          value: /usr/src/app/files/log-output.txt
+        - name: PORT
+          value: "8080"
+        - name: TAIL_LINES
+          value: "10"
+        
+
