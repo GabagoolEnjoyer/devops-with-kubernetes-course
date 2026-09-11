@@ -16,11 +16,15 @@ spec:
     spec:
       containers:
       - name: todo-app
-        image: todo-app:1.1
+        image: todo-app:1.2
         imagePullPolicy: Never
         env:
         - name: PORT
           value: "6666"
+        - name: CACHE_DIR
+          value: /usr/src/app/files/
+        - name: CACHE_TTL
+          value: "600"
         ports:
         - containerPort: 80
         resources:

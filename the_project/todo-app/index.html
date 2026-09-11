@@ -14,22 +14,72 @@
             color: #333; 
         }
         h1 { text-align: center; color: #2c3e50; }
+        h2 { text-align: center; color: #2c3e50; margin-top: 30px; }
         .card { 
             background: white; 
             padding: 20px; 
             border-radius: 8px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
         }
-        ul { list-style: none; padding: 0; margin: 0; }
-        li { 
-            padding: 15px; 
-            border-bottom: 1px solid #eee; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
+        .card img { 
+            width: 55%; 
+            max-width: 280px;
+            height: auto; 
+            display: block; 
+            margin: 0 auto; 
+            border-radius: 6px; 
         }
-        li:last-child { border-bottom: none; }
-        .status { font-size: 1.2em; }
+
+        /* Форма добавления todo */
+        .todo-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        .todo-form input {
+            flex: 1;
+            padding: 12px 15px;
+            font-size: 1em;
+            border: 2px solid #4caf50;
+            border-radius: 4px;
+            outline: none;
+        }
+        .todo-form input:focus {
+            border-color: #388e3c;
+        }
+        .todo-form button {
+            padding: 12px 25px;
+            font-size: 1em;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .todo-form button:hover {
+            background: #43a047;
+        }
+        .char-counter {
+            text-align: right;
+            font-size: 0.8em;
+            color: #7f8c8d;
+            margin-top: 4px;
+        }
+
+        /* Список todo */
+        ul.todos {
+            list-style: none;
+            padding: 0;
+            margin: 20px 0 0 0;
+        }
+        ul.todos li {
+            background: #eef1f3;
+            border-left: 5px solid #4caf50;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
         .port-info { 
             text-align: center; 
             color: #7f8c8d; 
@@ -39,23 +89,57 @@
     </style>
 </head>
 <body>
-    <h1>📝 Todo App</h1>
+    <h1>Todo App</h1>
     <div class="card">
-        <ul id="todos">
-            <li>
-                <span>Подготовить Python-сервер</span>
-                <span class="status">✅</span>
-            </li>
-            <li>
-                <span>Вернуть HTML на GET /</span>
-                <span class="status">✅</span>
-            </li>
-            <li>
-                <span>Проверить работу через порт-форвардинг</span>
-                <span class="status">⏳</span>
-            </li>
+        <img src="/image" alt="Random bear">
+
+        <!-- Форма: input + кнопка Send -->
+        <form class="todo-form" id="todo-form">
+            <input
+                type="text"
+                id="todo-input"
+                maxlength="140"
+                placeholder="Enter a new todo (max 140 characters)"
+                autocomplete="off"
+            >
+            <button type="submit">Send</button>
+        </form>
+        <div class="char-counter"><span id="char-count">0</span>/140</div>
+
+        <!-- Список существующих todo (захардкожены) -->
+        <h2>Todos</h2>
+        <ul class="todos" id="todo-list">
+            <li>Learn Kubernetes basics</li>
+            <li>Deploy application to cluster</li>
+            <li>Configure persistent volumes</li>
         </ul>
     </div>
-    <p class="port-info">Server is running on port <strong>{port}</strong></p>
+    <p class="port-info">DevOps with Kubernetes 2026 · port <strong>{port}</strong></p>
+
+    <script>
+        const form = document.getElementById('todo-form');
+        const input = document.getElementById('todo-input');
+        const counter = document.getElementById('char-count');
+
+        // Счётчик символов под полем ввода
+        input.addEventListener('input', () => {
+            counter.textContent = input.value.length;
+        });
+
+        // Кнопка Send пока ничего не отправляет
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();  // отменяем перезагрузку страницы
+
+            const text = input.value.trim();
+
+            // Дополнительная защита: не принимаем todo длиннее 140 символов
+            if (!text || text.length > 140) {
+                return;
+            }
+
+            // Здесь позже появится отправка на сервер (POST /todos)
+            console.log('Todo accepted (отправка ещё не реализована):', text);
+        });
+    </script>
 </body>
 </html>
