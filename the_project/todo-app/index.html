@@ -106,12 +106,10 @@
         </form>
         <div class="char-counter"><span id="char-count">0</span>/140</div>
 
-        <!-- Список существующих todo (захардкожены) -->
+        <!-- Список todo: отрендерен на сервере (todo-app -> todo-backend) -->
         <h2>Todos</h2>
         <ul class="todos" id="todo-list">
-            <li>Learn Kubernetes basics</li>
-            <li>Deploy application to cluster</li>
-            <li>Configure persistent volumes</li>
+            {todo_items}
         </ul>
     </div>
     <p class="port-info">DevOps with Kubernetes 2026 · port <strong>{port}</strong></p>
@@ -121,24 +119,41 @@
         const input = document.getElementById('todo-input');
         const counter = document.getElementById('char-count');
 
+        // Куда БРАУЗЕР постит новый todo (Ingress маршрутизирует в todo-backend)
+        const TODO_POST_URL = '{todos_post_url}';
+
         // Счётчик символов под полем ввода
         input.addEventListener('input', () => {
             counter.textContent = input.value.length;
         });
 
-        // Кнопка Send пока ничего не отправляет
-        form.addEventListener('submit', (event) => {
-            event.preventDefault();  // отменяем перезагрузку страницы
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();  // отменяем стандартную отправку формы
 
             const text = input.value.trim();
 
-            // Дополнительная защита: не принимаем todo длиннее 140 символов
+            // Защита на клиенте: не принимаем todo длиннее 140 символов
             if (!text || text.length > 140) {
                 return;
             }
 
-            // Здесь позже появится отправка на сервер (POST /todos)
-            console.log('Todo accepted (отправка ещё не реализована):', text);
+            try {
+                const resp = await fetch(TODO_POST_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text }),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || ('HTTP ' + resp.status));
+                }
+
+                // Перезагружаем страницу: todo-app заново отрендерит список с бэкенда
+                window.location.reload();
+            } catch (err) {
+                alert('Failed to create todo: ' + err.message);
+            }
         });
     </script>
 </body>

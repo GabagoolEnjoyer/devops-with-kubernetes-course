@@ -13,3 +13,10 @@ spec:
               name: todo-app-svc
               port:
                 number: 7777
+        - path: /todos
+          pathType: Prefix
+          backend:
+            service:
+              name: todo-backend-service
+              port:
+                number: 8888

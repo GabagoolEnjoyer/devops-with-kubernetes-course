@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Minimal Todo App HTTP server with cached random bear image."""
+"""Minimal Todo App HTTP server with cached random bear image.
+
+Server-side rendering: список todo запрашивается у todo-backend
+изнутри кластера и встраивается в HTML на момент запроса страницы.
+"""
 
 import json
 import os
@@ -9,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.request
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,6 +21,16 @@ from urllib.parse import urlparse
 DEFAULT_PORT = 3000
 BASE_DIR = Path(__file__).parent
 INDEX_HTML_PATH = BASE_DIR / "index.html"
+
+# Внутренний адрес todo-backend: по нему ходит САМ todo-app (GET /todos).
+# Браузер его не видит — это server-to-server запрос внутри кластера.
+TODOS_URL = os.environ.get("TODOS_URL", "http://todo-backend-service:8888")
+
+# Адрес, по которому БРАУЗЕР постит новые todo (маршрутизирует Ingress).
+TODOS_POST_URL = os.environ.get("TODOS_POST_URL", "/todos")
+
+# Таймаут запросов к todo-backend, чтобы не подвешивать отдачу страницы
+TODOS_TIMEOUT = float(os.environ.get("TODOS_TIMEOUT", "3"))
 
 # Директория для кеша картинки (должна указывать на примонтированный том)
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", str(BASE_DIR / "files")))
@@ -44,6 +59,32 @@ def get_port():
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def fetch_todos() -> list:
+    """Server-side запрос списка todo у todo-backend (внутри кластера)."""
+    url = TODOS_URL.rstrip("/") + "/todos"
+
+    try:
+        with urllib.request.urlopen(url, timeout=TODOS_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError) as exc:
+        print(f"Warning: cannot fetch todos from {url}: {exc}", flush=True)
+        return []
+
+
+def render_todo_items(todos: list) -> str:
+    """Превращает список todo в готовые <li> для HTML (с экранированием)."""
+    if not todos:
+        return "<li>No todos yet — add the first one!</li>"
+
+    items = []
+    for todo in todos:
+        text = todo.get("text", "") if isinstance(todo, dict) else str(todo)
+        items.append(f"<li>{escape(text)}</li>")
+
+    return "\n            ".join(items)
 
 
 def random_bear_url() -> str:
@@ -176,7 +217,12 @@ class TodoAppHandler(BaseHTTPRequestHandler):
         if path == "/":
             try:
                 template = INDEX_HTML_PATH.read_text(encoding="utf-8")
-                html = template.replace("{port}", str(port))
+                html = (
+                    template
+                    .replace("{port}", str(port))
+                    .replace("{todo_items}", render_todo_items(fetch_todos()))
+                    .replace("{todos_post_url}", TODOS_POST_URL)
+                )
             except FileNotFoundError:
                 html = "<h1>index.html not found</h1>"
             self._send_html(html)
@@ -192,9 +238,6 @@ class TodoAppHandler(BaseHTTPRequestHandler):
 
         elif path == "/healthz":
             self._send_text("OK")
-
-        elif path == "/todos":
-            self._send_text("[]")
 
         elif path == "/shutdown":
             # Тестовый эндпоинт: имитирует падение контейнера
@@ -233,6 +276,8 @@ def main():
     print(f"Server started in port {bound_port}", flush=True)
     print(f"Image cache dir: {CACHE_DIR}", flush=True)
     print(f"Cache TTL: {CACHE_TTL}s", flush=True)
+    print(f"Todos backend (server-side): {TODOS_URL}", flush=True)
+    print(f"Todos POST url (browser): {TODOS_POST_URL}", flush=True)
 
     try:
         server.serve_forever()

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: todo-app
-        image: todo-app:1.3
+        image: todo-app:1.5
         imagePullPolicy: Never
         env:
         - name: PORT
@@ -25,6 +25,8 @@ spec:
           value: /usr/src/app/files/
         - name: CACHE_TTL
           value: "600"
+        - name: TODOS_URL
+          value: http://todo-backend-service:8888
         ports:
         - containerPort: 80
         resources:
