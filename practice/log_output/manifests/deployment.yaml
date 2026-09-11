@@ -39,7 +39,7 @@ spec:
           value: /usr/src/app/files/log-output.txt
 
       - name: reader
-        image: reader:1.1
+        image: reader:1.4
         imagePullPolicy: Never
         ports:
         - containerPort: 8080
@@ -60,7 +60,11 @@ spec:
           value: "8080"
         - name: TAIL_LINES
           value: "10"
-        - name: COUNTER_FILE
-          value: /usr/src/app/files/pingpong-counter.txt
+        - name: PINGPONG_URL
+          value: http://pingpong-svc:4444/pings
+        - name: PINGPONG_TIMEOUT
+          value: "3"
+        # - name: COUNTER_FILE
+        #   value: /usr/src/app/files/pingpong-counter.txt
         
 

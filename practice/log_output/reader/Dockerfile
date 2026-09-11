@@ -1,4 +1,4 @@
-# 1.1
+# 1.4
 FROM python:3.15.0rc2-slim-trixie
 WORKDIR /usr/src/app
 COPY reader.py .

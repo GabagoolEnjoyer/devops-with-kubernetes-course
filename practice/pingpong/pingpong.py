@@ -1,83 +1,68 @@
 #!/usr/bin/env python3
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from threading import Lock
+"""
+Ping-pong service:
+- GET /pingpong — увеличивает счётчик и отвечает "pong N"
+- GET /pings    — отдаёт текущее количество pong БЕЗ инкремента (для log-output)
+- GET /healthz  — health check
+"""
+
 import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 
-# Путь к файлу на shared volume
-COUNTER_FILE = os.environ.get("COUNTER_FILE", "/shared/pingpong-counter.txt")
+# Порт HTTP-сервера
+PORT = int(os.environ.get("PORT", "8080"))
 
-# Счётчик запросов
+# Счётчик запросов (живёт в памяти, файл больше не используется)
 counter = 0
 counter_lock = Lock()
 
 
-def load_counter():
-    """Загружает счётчик из файла при старте."""
-    global counter
-    try:
-        if os.path.exists(COUNTER_FILE):
-            with open(COUNTER_FILE, 'r', encoding='utf-8') as f:
-                counter = int(f.read().strip())
-                print(f"Loaded counter from file: {counter}", flush=True)
-        else:
-            counter = 0
-            print("Counter file not found, starting from 0", flush=True)
-    except (ValueError, IOError) as e:
-        counter = 0
-        print(f"Error loading counter: {e}, starting from 0", flush=True)
-
-
-def save_counter():
-    """Сохраняет счётчик в файл."""
-    try:
-        # Создаём директорию, если её нет
-        os.makedirs(os.path.dirname(COUNTER_FILE), exist_ok=True)
-        
-        with open(COUNTER_FILE, 'w', encoding='utf-8') as f:
-            f.write(str(counter))
-            f.flush()
-    except IOError as e:
-        print(f"Error saving counter: {e}", flush=True)
-
-
 class PingPongHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
         global counter
-        
-        if self.path == '/pingpong':
-            # Увеличиваем счётчик и сохраняем в файл
+
+        if self.path == "/pingpong":
+            # Увеличиваем счётчик
             with counter_lock:
                 counter += 1
                 current_count = counter
-                save_counter()
-            
-            response = f"pong {current_count}"
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(response.encode('utf-8'))
+            self._send_text(f"pong {current_count}")
+
+        elif self.path in ("/pings", "/count"):
+            # Только отдаём текущее значение, не увеличивая
+            with counter_lock:
+                current_count = counter
+            self._send_text(str(current_count))
+
+        elif self.path == "/healthz":
+            self._send_text("OK")
+
         else:
-            # Любой другой путь — 404
-            self.send_response(404)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b"Not Found")
-    
-    def log_message(self, format, *args):
-        # Выводим логи в stdout, чтобы их было видно в Kubernetes
+            self._send_text("Not Found", status=404)
+
+    def _send_text(self, text, status=200):
+        body = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        # Логи запросов в stdout
         print(f"{self.client_address[0]} - {args[0]}", flush=True)
 
 
 def main():
-    # Загружаем счётчик из файла при старте
-    load_counter()
-    
-    port = 8080
-    server = HTTPServer(('', port), PingPongHandler)
-    print(f"Ping-pong server started on port {port}", flush=True)
-    print(f"Counter file: {COUNTER_FILE}", flush=True)
-    
+    # ThreadingHTTPServer: каждое соединение в своём потоке,
+    # keep-alive от Traefik больше не блокирует остальных клиентов
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), PingPongHandler)
+    server.daemon_threads = True
+    print(f"Ping-pong server started on port {PORT}", flush=True)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

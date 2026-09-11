@@ -2,20 +2,24 @@
 """
 Reader container:
 - Читает лог-файл (пишется writer'ом)
-- Читает счётчик ping/pong (пишется pingpong'ом)
+- Ходит по HTTP в ping-pong сервис за количеством pong (GET /pings)
 - При HTTP-запросе отдаёт последнюю строку лога + количество ping/pong
 """
 
-import os
 import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+import urllib.request
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Путь к лог-файлу (пишется writer'ом)
+# Путь к лог-файлу (пишется writer'ом, общий volume внутри пода)
 LOG_FILE = os.environ.get("LOG_FILE", "/shared/log-output.txt")
 
-# Путь к файлу со счётчиком ping/pong (пишется pingpong'ом)
-COUNTER_FILE = os.environ.get("COUNTER_FILE", "/shared/pingpong-counter.txt")
+# Адрес ping-pong сервиса (DNS-имя сервиса внутри кластера)
+PINGPONG_URL = os.environ.get("PINGPONG_URL", "http://pingpong-svc:4444/pings")
+
+# Таймаут запроса к ping-pong, чтобы не подвешивать входящие запросы
+PINGPONG_TIMEOUT = float(os.environ.get("PINGPONG_TIMEOUT", "3"))
 
 # Порт HTTP-сервера
 PORT = int(os.environ.get("PORT", "8080"))
@@ -41,30 +45,23 @@ def read_last_log_line() -> str:
         if not lines:
             return ""
 
-        # Берём последнюю строку и убираем переносы
-        last_line = lines[-1].rstrip('\n\r')
-        return last_line
+        return lines[-1].rstrip("\n\r")
     except (IOError, OSError):
         return ""
 
 
-def read_pingpong_count() -> int:
+def fetch_pong_count() -> int:
     """
-    Читает текущее количество ping/pong запросов из файла.
-    Возвращает 0, если файл не существует, пустой или содержит невалидные данные.
+    HTTP GET к ping-pong сервису за количеством pong.
+    Возвращает 0, если сервис недоступен или ответил нечислом.
     """
     try:
-        if not os.path.exists(COUNTER_FILE):
-            return 0
-
-        with open(COUNTER_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-
-        if not content:
-            return 0
-
+        with urllib.request.urlopen(PINGPONG_URL, timeout=PINGPONG_TIMEOUT) as resp:
+            content = resp.read().decode("utf-8").strip()
         return int(content)
-    except (IOError, OSError, ValueError):
+    except (OSError, ValueError) as e:
+        # URLError, timeout, connection refused, невалидное число — все сюда
+        print(f"Warning: cannot fetch pong count from {PINGPONG_URL}: {e}", flush=True)
         return 0
 
 
@@ -75,15 +72,15 @@ def format_response() -> str:
     Ping / Pongs: 3
     """
     last_line = read_last_log_line()
-    count = read_pingpong_count()
+    count = fetch_pong_count()
 
     if not last_line:
         # Writer ещё не успел записать ни одной строки
         return f"No log data available yet.\nPing / Pongs: {count}\n"
 
-    # Добавляем точку в конце строки лога, если её там нет (согласно ТЗ)
-    if not last_line.endswith('.'):
-        last_line = last_line + '.'
+    # Точка в конце строки лога, если её там нет (согласно ТЗ)
+    if not last_line.endswith("."):
+        last_line = last_line + "."
 
     return f"{last_line}\nPing / Pongs: {count}\n"
 
@@ -93,16 +90,14 @@ class LogReaderHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
-            content = format_response()
-            self._send_text(content)
+            self._send_text(format_response())
 
         elif self.path == "/status":
-            content = format_response()
             status = {
                 "timestamp": get_timestamp(),
                 "log_file": LOG_FILE,
-                "counter_file": COUNTER_FILE,
-                "content": content
+                "pingpong_url": PINGPONG_URL,
+                "content": format_response(),
             }
             self._send_json(status)
 
@@ -136,10 +131,12 @@ class LogReaderHandler(BaseHTTPRequestHandler):
 def main() -> None:
     print(f"Reader started on port {PORT}", flush=True)
     print(f"Log file: {LOG_FILE}", flush=True)
-    print(f"Counter file: {COUNTER_FILE}", flush=True)
+    print(f"Ping-pong URL: {PINGPONG_URL}", flush=True)
 
     try:
-        server = HTTPServer(("0.0.0.0", PORT), LogReaderHandler)
+        # ThreadingHTTPServer вместо HTTPServer для параллельной обработки запросов
+        server = ThreadingHTTPServer(("0.0.0.0", PORT), LogReaderHandler)
+        server.daemon_threads = True
         server.serve_forever()
     except KeyboardInterrupt:
         print("Reader stopped.", flush=True)

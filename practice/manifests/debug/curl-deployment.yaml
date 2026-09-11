@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-pod
+  labels:
+    app: debug-pod
+spec:
+  containers:
+  - name: debug-curl-container
+    image: curlimages/curl:8.22.0
+    command:
+      - sleep
+      - "3600"
+    imagePullPolicy: IfNotPresent
+    resources:
+      limits:
+        memory: "256Mi"  # Maximum memory allowed
+        cpu: "200m"      # Maximum CPU allowed
+      requests:
+        memory: "128Mi"  # Initial memory request
+        cpu: "100m"
+    restartPolicy: Always
