@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: todo-app-deployment
+  namespace: project
   labels:
     app: todo-app
 spec:
@@ -16,11 +17,17 @@ spec:
     spec:
       containers:
       - name: todo-app
-        image: todo-app:1.1
+        image: todo-app:1.5
         imagePullPolicy: Never
         env:
         - name: PORT
           value: "6666"
+        - name: CACHE_DIR
+          value: /usr/src/app/files/
+        - name: CACHE_TTL
+          value: "600"
+        - name: TODOS_URL
+          value: http://todo-backend-service:8888
         ports:
         - containerPort: 80
         resources:

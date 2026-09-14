@@ -1,6 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  namespace: exercises
   name: log-output-deployment
   labels:
     app: log-output
@@ -16,10 +17,11 @@ spec:
     spec:
       volumes:
         - name: shared-image
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: project-pvc
       containers:
       - name: writer
-        image: writer:1.0
+        image: writer:1.1
         imagePullPolicy: Never
         # ports:
         # - containerPort: 8080
@@ -38,7 +40,7 @@ spec:
           value: /usr/src/app/files/log-output.txt
 
       - name: reader
-        image: reader:1.0
+        image: reader:1.4
         imagePullPolicy: Never
         ports:
         - containerPort: 8080
@@ -59,5 +61,11 @@ spec:
           value: "8080"
         - name: TAIL_LINES
           value: "10"
+        - name: PINGPONG_URL
+          value: http://pingpong-svc:4444/pings
+        - name: PINGPONG_TIMEOUT
+          value: "3"
+        # - name: COUNTER_FILE
+        #   value: /usr/src/app/files/pingpong-counter.txt
         
 
