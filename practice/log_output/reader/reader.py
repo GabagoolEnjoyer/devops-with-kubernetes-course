@@ -3,7 +3,8 @@
 Reader container:
 - Читает лог-файл (пишется writer'ом)
 - Ходит по HTTP в ping-pong сервис за количеством pong (GET /pings)
-- При HTTP-запросе отдаёт последнюю строку лога + количество ping/pong
+- Читает файл information.txt и env MESSAGE из ConfigMap
+- При HTTP-запросе отдаёт всё вместе в требуемом формате
 """
 
 import json
@@ -14,6 +15,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Путь к лог-файлу (пишется writer'ом, общий volume внутри пода)
 LOG_FILE = os.environ.get("LOG_FILE", "/shared/log-output.txt")
+
+# Путь к файлу information.txt из ConfigMap (смонтирован как volume)
+CONFIG_FILE = os.environ.get("CONFIG_FILE", "/usr/src/app/config/information.txt")
+
+# Env-переменная MESSAGE из ConfigMap
+MESSAGE = os.environ.get("MESSAGE", "")
 
 # Адрес ping-pong сервиса (DNS-имя сервиса внутри кластера)
 PINGPONG_URL = os.environ.get("PINGPONG_URL", "http://pingpong-svc:4444/pings")
@@ -28,6 +35,18 @@ PORT = int(os.environ.get("PORT", "8080"))
 def get_timestamp() -> str:
     now = datetime.now(timezone.utc)
     return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def read_config_file() -> str:
+    """
+    Читает содержимое файла information.txt, смонтированного из ConfigMap.
+    Возвращает пустую строку, если файла нет или он пустой.
+    """
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except (IOError, OSError):
+        return ""
 
 
 def read_last_log_line() -> str:
@@ -68,21 +87,36 @@ def fetch_pong_count() -> int:
 def format_response() -> str:
     """
     Формирует ответ в требуемом формате:
+    file content: this text is from file
+    env variable: MESSAGE=hello world
     2020-03-30T12:15:17.705Z: 8523ecb1-c716-4cb6-a044-b9e83bb98e43.
     Ping / Pongs: 3
     """
+    file_content = read_config_file()
     last_line = read_last_log_line()
     count = fetch_pong_count()
 
+    lines = []
+
+    # Строка 1: содержимое файла из ConfigMap
+    lines.append(f"file content: {file_content}")
+
+    # Строка 2: значение env-переменной MESSAGE
+    lines.append(f"env variable: MESSAGE={MESSAGE}")
+
+    # Строка 3: последняя строка лога от writer'а
     if not last_line:
-        # Writer ещё не успел записать ни одной строки
-        return f"No log data available yet.\nPing / Pongs: {count}\n"
+        lines.append("No log data available yet.")
+    else:
+        # Точка в конце строки лога, если её там нет (согласно ТЗ)
+        if not last_line.endswith("."):
+            last_line = last_line + "."
+        lines.append(last_line)
 
-    # Точка в конце строки лога, если её там нет (согласно ТЗ)
-    if not last_line.endswith("."):
-        last_line = last_line + "."
+    # Строка 4: количество ping/pong
+    lines.append(f"Ping / Pongs: {count}")
 
-    return f"{last_line}\nPing / Pongs: {count}\n"
+    return "\n".join(lines) + "\n"
 
 
 class LogReaderHandler(BaseHTTPRequestHandler):
@@ -96,6 +130,8 @@ class LogReaderHandler(BaseHTTPRequestHandler):
             status = {
                 "timestamp": get_timestamp(),
                 "log_file": LOG_FILE,
+                "config_file": CONFIG_FILE,
+                "message": MESSAGE,
                 "pingpong_url": PINGPONG_URL,
                 "content": format_response(),
             }
@@ -131,6 +167,8 @@ class LogReaderHandler(BaseHTTPRequestHandler):
 def main() -> None:
     print(f"Reader started on port {PORT}", flush=True)
     print(f"Log file: {LOG_FILE}", flush=True)
+    print(f"Config file: {CONFIG_FILE}", flush=True)
+    print(f"MESSAGE env: {MESSAGE!r}", flush=True)
     print(f"Ping-pong URL: {PINGPONG_URL}", flush=True)
 
     try:
