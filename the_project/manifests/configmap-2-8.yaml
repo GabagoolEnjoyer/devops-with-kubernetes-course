@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todo-configmap
+  namespace: project
+data:
+  POSTGRES_HOST: postgres-project-0.postgres-project-svc
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: postgres
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DB_STARTUP_RETRIES: "30"
+  DB_STARTUP_DELAY: "2"
+  PGDATA: /data/pgdata
