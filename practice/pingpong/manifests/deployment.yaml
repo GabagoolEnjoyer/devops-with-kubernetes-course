@@ -21,7 +21,7 @@ spec:
       #       claimName: project-pvc
       containers:
       - name: pingpong
-        image: pingpong:1.5
+        image: pingpong:1.6
         ports:
         - containerPort: 80
         # volumeMounts:
@@ -34,6 +34,9 @@ spec:
           requests:
             memory: "128Mi"  # Initial memory request
             cpu: "100m"  
+        envFrom:
+          - configMapRef:
+              name: practice-config-map
         env:
         # - name: COUNTER_FILE
         #   value: /usr/src/app/files/pingpong-counter.txt
