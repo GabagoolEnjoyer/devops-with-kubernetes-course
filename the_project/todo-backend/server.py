@@ -1,28 +1,136 @@
 #!/usr/bin/env python3
 """
-Todo-backend service:
+Todo-backend service with PostgreSQL:
 - GET  /todos   — отдаёт список всех todo (JSON)
 - POST /todos   — создаёт новое todo (JSON-тело {"text": "..."}), отвечает 201
-- GET  /healthz — health check
+- GET  /healthz — health check (также проверяет доступность БД)
 
-Хранилище — память процесса (БД появится позже).
+Хранилище — PostgreSQL.
 """
 
 import json
 import os
 import signal
 import sys
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import psycopg
+
 DEFAULT_PORT = 8080
 MAX_TODO_LEN = 140
 
-# Хранилище в памяти + блокировка (сервер многопоточный)
-_todos = []  # [{"id": 1, "text": "..."}, ...]
-_next_id = 1
-_lock = threading.Lock()
+# Конфигурация БД из переменных окружения
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres-project-0.postgres-project-svc")
+POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "postgres")
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
+
+DB_STARTUP_RETRIES = int(os.environ.get("DB_STARTUP_RETRIES", "30"))
+DB_STARTUP_DELAY = float(os.environ.get("DB_STARTUP_DELAY", "2"))
+
+# Глобальное состояние соединения с БД
+_db_conn = None
+_db_lock = threading.Lock()
+
+
+def _conninfo() -> str:
+    return (
+        f"host={POSTGRES_HOST} "
+        f"port={POSTGRES_PORT} "
+        f"dbname={POSTGRES_DB} "
+        f"user={POSTGRES_USER} "
+        f"password={POSTGRES_PASSWORD}"
+    )
+
+
+def _connect():
+    """Создаёт новое соединение."""
+    conn = psycopg.connect(_conninfo(), autocommit=True)
+    return conn
+
+
+def wait_for_db() -> None:
+    """Retry-loop при старте: ждём, пока Postgres примет подключения."""
+    for attempt in range(1, DB_STARTUP_RETRIES + 1):
+        try:
+            conn = _connect()
+            conn.close()
+            print(f"✅ PostgreSQL is ready (attempt {attempt})", flush=True)
+            return
+        except psycopg.OperationalError as e:
+            print(
+                f"⏳ Waiting for PostgreSQL (attempt {attempt}/{DB_STARTUP_RETRIES}): {e}",
+                flush=True,
+            )
+            time.sleep(DB_STARTUP_DELAY)
+
+    print("❌ Failed to connect to PostgreSQL after all retries, exiting.", flush=True)
+    sys.exit(1)
+
+
+def init_schema() -> None:
+    """Создаёт таблицу todos, если её ещё нет."""
+    with _db_lock:
+        cur = _db_conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS todos (
+                    id SERIAL PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+                """
+            )
+        finally:
+            cur.close()
+    print("✅ Schema initialized (todos table)", flush=True)
+
+
+def get_connection():
+    """Возвращает живое соединение, пересоздавая при необходимости."""
+    global _db_conn
+    with _db_lock:
+        if _db_conn is None or _db_conn.closed:
+            _db_conn = _connect()
+        return _db_conn
+
+
+def execute_query(query: str, params: tuple = None, fetchone: bool = False, fetchall: bool = False):
+    """
+    Выполняет SQL-запрос с автоматическим reconnect'ом при обрыве связи.
+    """
+    for attempt in range(2):
+        try:
+            conn = get_connection()
+            with _db_lock:
+                cur = conn.cursor()
+                try:
+                    cur.execute(query, params)
+                    if fetchone:
+                        return cur.fetchone()
+                    elif fetchall:
+                        return cur.fetchall()
+                    return None
+                finally:
+                    cur.close()
+        except (psycopg.OperationalError, psycopg.InterfaceError) as e:
+            print(f"⚠️  DB error (attempt {attempt + 1}): {e}", flush=True)
+            with _db_lock:
+                global _db_conn
+                try:
+                    if _db_conn is not None and not _db_conn.closed:
+                        _db_conn.close()
+                except Exception:
+                    pass
+                _db_conn = None
+            time.sleep(0.5)
+
+    raise RuntimeError("Database unavailable after reconnect attempt")
 
 
 def get_port():
@@ -42,10 +150,8 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "TodoBackend/1.0"
 
-    # ---------- вспомогательные методы ----------
-
     def _cors_headers(self):
-        # Чтобы фронтенд мог обращаться к бэкенду с другого порта при локальной разработке
+        """CORS заголовки для доступа с других портов при локальной разработке."""
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -66,10 +172,8 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length > 0 else b""
 
-    # ---------- HTTP-методы ----------
-
     def do_OPTIONS(self):
-        # CORS preflight от браузера
+        """CORS preflight от браузера."""
         self.send_response(204)
         self._cors_headers()
         self.send_header("Content-Length", "0")
@@ -79,15 +183,35 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == "/todos":
-            with _lock:
-                snapshot = list(_todos)
-            self._send_json(snapshot)
-
+            self._handle_get_todos()
         elif path == "/healthz":
-            self._send_json({"status": "OK"})
-
+            self._handle_healthz()
         else:
             self._send_json({"error": "Not Found"}, status=404)
+
+    def _handle_get_todos(self):
+        """Отдаёт список всех todo из БД."""
+        try:
+            rows = execute_query(
+                "SELECT id, text, created_at FROM todos ORDER BY id",
+                fetchall=True,
+            )
+            todos = [
+                {"id": row[0], "text": row[1], "created_at": row[2].isoformat()}
+                for row in rows
+            ]
+            self._send_json(todos)
+        except Exception as e:
+            print(f"ERROR on GET /todos: {e}", flush=True)
+            self._send_json({"error": "Database error"}, status=503)
+
+    def _handle_healthz(self):
+        """Health check: приложение живое + БД достижима."""
+        try:
+            execute_query("SELECT 1", fetchone=True)
+            self._send_json({"status": "OK"})
+        except Exception as e:
+            self._send_json({"status": "DB down", "error": str(e)}, status=503)
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -96,6 +220,10 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Not Found"}, status=404)
             return
 
+        self._handle_create_todo()
+
+    def _handle_create_todo(self):
+        """Создаёт новый todo в БД."""
         raw = self._read_body()
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -119,14 +247,22 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
             )
             return
 
-        global _next_id
-        with _lock:
-            todo = {"id": _next_id, "text": text}
-            _next_id += 1
-            _todos.append(todo)
-
-        print(f"Created todo #{todo['id']}: {text}", flush=True)
-        self._send_json(todo, status=201)
+        try:
+            row = execute_query(
+                "INSERT INTO todos (text) VALUES (%s) RETURNING id, text, created_at",
+                params=(text,),
+                fetchone=True,
+            )
+            todo = {
+                "id": row[0],
+                "text": row[1],
+                "created_at": row[2].isoformat()
+            }
+            print(f"Created todo #{todo['id']}: {todo['text']}", flush=True)
+            self._send_json(todo, status=201)
+        except Exception as e:
+            print(f"ERROR on POST /todos: {e}", flush=True)
+            self._send_json({"error": "Database error"}, status=503)
 
     def do_HEAD(self):
         self.do_GET()
@@ -135,8 +271,28 @@ class TodoBackendHandler(BaseHTTPRequestHandler):
         print(f"{self.client_address[0]} - {fmt % args}", flush=True)
 
 
+def shutdown(signum, frame):
+    """Graceful shutdown: закрываем соединение с БД."""
+    print("\nShutting down...", flush=True)
+    global _db_conn
+    with _db_lock:
+        if _db_conn is not None and not _db_conn.closed:
+            _db_conn.close()
+    sys.exit(0)
+
+
 def main():
     port = get_port()
+
+    print(f"Connecting to PostgreSQL at {POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}", flush=True)
+    wait_for_db()
+
+    global _db_conn
+    _db_conn = _connect()
+    init_schema()
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     try:
         server = ThreadingHTTPServer(("0.0.0.0", port), TodoBackendHandler)
@@ -149,10 +305,7 @@ def main():
 
     server.daemon_threads = True
 
-    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
-
-    print(f"Todo-backend started on port {port}", flush=True)
-    print(f"Storage: in-memory ({len(_todos)} todos)", flush=True)
+    print(f"Todo-backend (PostgreSQL) started on port {port}", flush=True)
 
     try:
         server.serve_forever()
@@ -160,6 +313,8 @@ def main():
         pass
     finally:
         server.server_close()
+        if _db_conn and not _db_conn.closed:
+            _db_conn.close()
 
 
 if __name__ == "__main__":

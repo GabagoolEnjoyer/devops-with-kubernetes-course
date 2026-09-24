@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: practice-config-map
+  namespace: exercises
+data:
+  MESSAGE: "hello"
+  information.txt: |
+    this text is cool
+  POSTGRES_HOST: postgres-practice-0.postgres-practice-svc
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: postgres
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DB_STARTUP_RETRIES: "30"
+  DB_STARTUP_DELAY: "2"

@@ -17,13 +17,16 @@ spec:
     spec:
       containers:
         - name: todo-backend
-          image: todo-backend:1.0
+          image: todo-backend:1.1
           ports:
           - containerPort: 80
           imagePullPolicy: Never
           env:
           - name: PORT
             value: "8080"
+          envFrom:
+          - configMapRef:
+              name: todo-configmap
           resources:
             limits:
               memory: "256Mi"  # Maximum memory allowed
